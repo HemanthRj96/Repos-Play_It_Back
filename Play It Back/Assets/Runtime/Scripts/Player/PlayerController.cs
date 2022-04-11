@@ -1,78 +1,89 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using FFG.Message;
-using System;
+
 
 public class PlayerController : MonoBehaviour
 {
-    [SerializeField]
-    [Min(0)]
+    // Serialized fields
+
+    [SerializeField, Min(0)]
     private float _moveSpeed = 0;
-    [SerializeField]
-    [Min(0)]
+    [SerializeField, Min(0)]
     private float _jumpForce = 0;
-    [SerializeField]
-    [Range(0, 1)]
+    [SerializeField, Range(0, 1)]
     private float _airControl = 0;
     [SerializeField]
     private LayerMask _groundLayerMask;
+    [SerializeField, Range(0, 0.2f)]
+    private float _accelerationTime;
+    [SerializeField, Range(0, 0.2f)]
+    private float _deccelerationTime;
+    [SerializeField]
+    private AnimationCurve _accelerationCurve;
+    [SerializeField]
+    private AnimationCurve _deccelerationCurve;
 
+    // Private fields
 
     private float _axisCached = 0;
+    private float _modifiedAxis = 0;
+    private float _accStartTime = -1;
+    private float _dccStartTime = -1;
+
+    private float _ma = 0;
+    private float _absAxis = 0;
 
     private Vector3 _spawnLocation;
 
     private Rigidbody2D _rb = null;
     private SpriteRenderer _sp = null;
+    private Transform _t = null;
 
     private List<Collider2D> _cachedGroundColliders = new List<Collider2D>();
 
+
+    private bool _bCanMove = true;
     private bool _bHasMoved = false;
 
 
+    // Properties
+
+    public Rigidbody2D Rb => _rb;
+
+    // Private methods
+
     private void Awake()
     {
+        _spawnLocation = GameObject.FindGameObjectWithTag("Spawn").transform.position;
         _rb = GetComponent<Rigidbody2D>();
         _sp = GetComponent<SpriteRenderer>();
-
-        _spawnLocation = GameObject.FindGameObjectWithTag("Spawn").transform.position;
-        transform.position = _spawnLocation;
-
-        TransformRecorder.Instance.AddTransformToRecorder(transform, "Player");
-        Message.CreateMessage(onLevelReset, "LR:");
+        _t = transform;
+        _t.position = _spawnLocation;
     }
-
-    private void Start()
-    {
-        //Message.AddMessageListener("TR:save", onRecordsSaved);
-    }
-
-
-    private void OnDisable() => _bHasMoved = false;
 
     private void Update()
     {
-        _axisCached = horizontal();
-
-        if(_axisCached != 0 && _bHasMoved == false)
+        if (_bCanMove == false)
         {
-            _bHasMoved = true;
-            Message.InvokeMessage("TR:start-rec");
+            _rb.bodyType = RigidbodyType2D.Static;
+            return;
         }
 
-        //Update jump
-        if (jump() && onGround())
-            _rb.AddForce(Vector2.up * _jumpForce, ForceMode2D.Impulse);
+        // Update input
+        inputUpdate();
     }
 
     private void FixedUpdate()
     {
-        //Update movement
-        if (_axisCached != 0 && !onGround())
-            _axisCached *= _airControl;
+        if (_bCanMove == false)
+        {
+            _rb.bodyType = RigidbodyType2D.Kinematic;
+            return;
+        }
 
-        transform.position += Vector3.right * _moveSpeed * _axisCached * Time.deltaTime;
+        // Update movement
+        locomotionUpdate();
     }
 
     private float horizontal() => Input.GetAxisRaw("Horizontal");
@@ -95,16 +106,68 @@ public class PlayerController : MonoBehaviour
         return hits.Length > 0;
     }
 
-    private void onLevelReset(IMessage obj)
+    private void inputUpdate()
     {
-        // Handle player death
-        gameObject.SetActive(false);
-        transform.position = _spawnLocation;
-        gameObject.SetActive(true);
+        _axisCached = horizontal();
+
+        if (_axisCached != 0 && _bHasMoved == false)
+            _bHasMoved = true;
+
+        //Update jump
+        if (jump() && onGround())
+            _rb.AddForce(Vector2.up * _jumpForce, ForceMode2D.Impulse);
     }
 
-    private void onRecordsSaved(IMessage obj)
+    private void locomotionUpdate()
     {
-        
+        if (_axisCached != 0 && !onGround())
+            _axisCached *= _airControl;
+
+        if (_axisCached != 0)
+        {
+
+            if (_accStartTime == -1)
+            {
+                _dccStartTime = -1;
+                _accStartTime = Time.time;
+
+                _ma = Mathf.Abs(_modifiedAxis);
+                _absAxis = Mathf.Abs(_axisCached);
+            }
+
+            _modifiedAxis = _axisCached * _accelerationCurve.Evaluate(Mathf.Lerp
+                (
+                    _ma,
+                    _absAxis,
+                    Mathf.Clamp01((Time.time - _accStartTime) / _accelerationTime)
+                ));
+        }
+        else if (_axisCached == 0)
+        {
+            if (_dccStartTime == -1)
+            {
+                _accStartTime = -1;
+                _dccStartTime = Time.time;
+
+                _ma = _modifiedAxis;
+            }
+
+            _modifiedAxis = _ma * _deccelerationCurve.Evaluate(Mathf.Lerp
+                (
+                    0,
+                    1,
+                    Mathf.Clamp01((Time.time - _dccStartTime) / _deccelerationTime))
+                );
+        }
+
+        transform.position += Vector3.right * _moveSpeed * _modifiedAxis * Time.deltaTime;
     }
+
+    // Public methods
+
+    public void DisableMoving() => _bCanMove = false;
+
+    public void EnableMoving() => _bCanMove = true;
+
+    public bool HasMoved() => _bHasMoved;
 }

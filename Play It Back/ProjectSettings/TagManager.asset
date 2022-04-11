@@ -8,6 +8,9 @@ TagManager:
   - Spawn
   - Key
   - Goal
+  - UI Menu
+  - Enemy Spawn
+  - Event System
   layers:
   - Default
   - TransparentFX
